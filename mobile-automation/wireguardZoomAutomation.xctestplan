@@ -1,0 +1,29 @@
+{
+  "configurations" : [
+    {
+      "id" : "421E3D56-B768-4B5F-B873-C3960EEEE00E",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:wireguardZoomAutomation.xcodeproj",
+      "identifier" : "B7F09AE82EB51F050055A7BE",
+      "name" : "wireguardZoomAutomation"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:wireguardZoomAutomation.xcodeproj",
+        "identifier" : "B7F09B182EB51F6C0055A7BE",
+        "name" : "ZoomDualUITests"
+      }
+    }
+  ],
+  "version" : 1
+}
