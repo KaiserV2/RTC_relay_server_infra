@@ -65,7 +65,7 @@ The three components are designed to be deployed roughly in the following order:
    `run_dpi_zoom_v2.py` workflow described in the paper (Zoom-specific
    sustained-UDP-flow detection).
 
-Per-sub-component setup instructions, dependencies, and known caveats are in
+Per-sub-component setup instructions, dependencies, and operating notes are in
 the respective `README.md` files.
 
 ## Anonymisation notice

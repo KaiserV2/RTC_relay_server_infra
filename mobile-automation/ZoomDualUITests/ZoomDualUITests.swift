@@ -140,6 +140,10 @@ final class ZoomDualUITests: XCTestCase {
 
     // MARK: - Client flow
     private func clientFlow(on app: XCUIApplication) {
+        // Optional startup delay: uncomment if the client's VPN comes up faster
+        // than the host finishes issuing the invite (see README, "Client-side startup delay").
+        // sleep(5)
+
         // Disambiguate multiple "Join" buttons: pick the visible, largest-area one
         XCTAssertTrue(tapJoinButton(in: app, timeout: 30.0), "Failed to tap the correct 'Join' button on client.")
         sleep(UInt32(callSecondsClient))

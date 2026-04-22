@@ -4,7 +4,7 @@ This component automates **one-to-one RTC calls between two physical iPhones** s
 
 The automation is implemented as **Xcode UI Tests** (`XCUITest`) that drive the iOS system Settings app (to toggle WireGuard VPN tunnels) and the target RTC application (to place and answer calls). Each iPhone runs its own test target: the **host** phone places outbound calls; the **client** phone answers them. The two targets are coordinated externally (the MacBook controller starts both UI test runs; each iPhone loops over its own list of VPN tunnels).
 
-The reference implementation in this repository targets the **Zoom iOS client** (bundle ID `us.zoom.videomeetings`). The Discord and WhatsApp automation flows used in the paper follow the same architecture with app-specific selector updates; they are not released here because (a) they are thin adaptations of the same loop and (b) the selectors drift with every app update, so a static release has limited reuse value.
+The reference implementation in this repository targets the **Zoom iOS client** (bundle ID `us.zoom.videomeetings`) as a fully documented example. The Discord and WhatsApp flows used in the paper share the same dual-iPhone architecture and are obtained by swapping the bundle ID and re-pointing the selectors in `hostFlow()` / `clientFlow()` at the target app; see the *Adapting to other RTC applications* section below for the exact procedure.
 
 ---
 
@@ -27,22 +27,23 @@ XCUITest is the only option that can (i) drive third-party apps via their bundle
 ```
 mobile-automation/
 ├── README.md                              ← this file
-├── wireguardZoomAutomation.xcodeproj/     ← Xcode project (stub host app + test targets)
+├── wireguardZoomAutomation.xcodeproj/     ← Xcode project configuration
 ├── wireguardZoomAutomation.xctestplan     ← test plan (controls parallelism, env vars)
-├── wireguardZoomAutomation/               ← stub "app under test" (a placeholder iOS app)
-│   ├── wireguardZoomAutomationApp.swift
+├── wireguardZoomAutomation/               ← minimal iOS host app (required by Xcode as the
+│   ├── wireguardZoomAutomationApp.swift      "app under test" for UI test targets)
 │   ├── ContentView.swift
 │   ├── Item.swift
 │   └── Assets.xcassets/
-├── wireguardZoomAutomationTests/          ← (unused) unit-test target placeholder
-├── wireguardZoomAutomationUITests/        ← (unused) UITest target scaffolding
+├── wireguardZoomAutomationTests/          ← default unit-test target (not exercised by the
+│   └── …                                     measurement pipeline; present so the project builds)
+├── wireguardZoomAutomationUITests/        ← default UI-test target scaffolded by Xcode
 │   ├── wireguardZoomAutomationUITests.swift
 │   └── wireguardZoomAutomationUITestsLaunchTests.swift
 └── ZoomDualUITests/
-    └── ZoomDualUITests.swift              ← the actual host/client automation
+    └── ZoomDualUITests.swift              ← host/client automation driven by the campaign
 ```
 
-The stub `wireguardZoomAutomation` app is present only because Xcode UI test targets must be attached to an "app under test"; the app itself is never used. All runnable logic lives in `ZoomDualUITests/ZoomDualUITests.swift`.
+The `wireguardZoomAutomation` app serves as the *app under test* that Xcode requires UI test targets to be attached to. The measurement logic in `ZoomDualUITests.swift` drives third-party apps (Zoom, the system Settings app, and SpringBoard) via `XCUIApplication(bundleIdentifier:)`, so the host app itself is only ever launched to satisfy Xcode's build model.
 
 ---
 
@@ -141,9 +142,9 @@ Open `wireguardZoomAutomation.xcodeproj` in Xcode **15.0** or newer. The project
 
 ### 2. Signing
 In *Signing & Capabilities*, assign a valid Apple Developer team to all three targets:
-- `wireguardZoomAutomation` (app)
-- `wireguardZoomAutomationTests` (unit tests — unused but must compile)
-- `wireguardZoomAutomationUITests` and/or `ZoomDualUITests` (UI tests — this is the one that actually runs)
+- `wireguardZoomAutomation` (host app required by Xcode's UI-test build model)
+- `wireguardZoomAutomationTests` (default unit-test target — signing is required for the project to build even if the target is not exercised during measurements)
+- `wireguardZoomAutomationUITests` and/or `ZoomDualUITests` (UI test targets; `ZoomDualUITests` is the one driven by the measurement campaign)
 
 A free Apple ID works for development builds on a single paired device; an enrolled team is required to run on multiple phones without 7-day re-signing.
 
@@ -222,21 +223,21 @@ The flow is structurally identical for any RTC app; only the selectors change. T
 
 ---
 
-## Known caveats and limitations
+## Operating notes
 
-UI automation against commercial RTC apps is inherently fragile; we document the failure modes we observed during the measurement campaign so that re-running this code yields predictable results rather than surprises.
+Practical guidance accumulated while running multi-day measurement campaigns with this harness.
 
-- **App version drift.** The selector strings in `ZoomDualUITests.swift` are stable against Zoom iOS 5.17.x–5.19.x. Major UI redesigns (e.g., Zoom changing the "Meet" tab label) require re-auditing the selector queries. When in doubt, pause the test in the Xcode debugger and call `po app.buttons.allElementsBoundByIndex.map { $0.label }` to re-enumerate live labels.
-- **"Join" disambiguation.** Multiple Zoom UI elements carry the label `Join`. `tapJoinButton()` picks the largest-area hittable one; if Zoom's future UI introduces another large `Join` element (e.g., a full-screen modal), the heuristic may select the wrong one. Replacing the area-based tiebreaker with an explicit `identifier` match is a safer long-term fix if Zoom exposes accessibility identifiers on that card.
-- **iOS consent dialogs.** On first run of the VPN toggle, iOS shows *"rtcproxy Would Like to Add VPN Configurations"*; `vpnHandleSystemAlerts()` covers `Allow / OK / Continue / Close` buttons, but new iOS releases occasionally introduce new labels. Add to the list in `vpnHandleSystemAlerts()` if you see the test stall on a first run.
-- **Client startup race.** The client flow waits up to 30s for the Join card; if the client enables its VPN faster than Zoom finishes signing the host in, the card never appears. Add `sleep(5)` as the first line of `clientFlow()` if you see sporadic "Failed to tap the correct Join button" failures — this gives the host time to issue the invite before the client starts polling.
-- **Zoom background state.** If Zoom is killed by iOS (e.g., memory pressure) while a call is ringing, the incoming-call banner is owned by SpringBoard, not Zoom, and `XCUIApplication(bundleIdentifier: zoomBundleId)` cannot query it. The test relaunches Zoom at the start of every iteration (`app.terminate(); app.launch()`) to avoid starting from an ambiguous state.
-- **Multi-phone parallel runs via `⌘U`.** Xcode's default behaviour with two destinations is to run the same test on both. This repo's `.xctestplan` disables that by setting `executeInParallel = false`; use Option B above (two `xcodebuild test` invocations with explicit `-destination id=...`) if you want true per-phone test selection.
-- **Auto-lock / Always-On display.** Do not use Always-On display with StandBy mode during runs — StandBy swallows taps on the Join card. Temporarily set Auto-Lock to *Never*.
-- **Free Apple ID signing.** A free developer account limits you to one paired device and re-signs expire after 7 days, breaking long campaigns. Enrol in the Apple Developer Program ($99/yr) before starting multi-week data collection.
+- **Keeping selectors in sync with app updates.** The selector strings in `ZoomDualUITests.swift` were last audited against Zoom iOS 5.17–5.19. When targeting a different Zoom release, re-audit the live accessibility tree by pausing in the Xcode debugger and calling `po app.buttons.allElementsBoundByIndex.map { $0.label }` to print the current element labels; update the matching strings in `hostFlow()` / `clientFlow()` accordingly.
+- **Disambiguating the "Join" element.** Multiple Zoom UI elements carry the label `Join` (the tab bar, the incoming-call card). `tapJoinButton()` resolves this by picking the visible, hittable element with the largest area, which consistently selects the incoming-call card across the Zoom versions we tested. If a future release introduces an even larger `Join` element, switch the tiebreaker to an explicit accessibility identifier match.
+- **Handling system alerts.** `vpnHandleSystemAlerts()` dismisses the `Allow / OK / Continue / Close` prompts iOS shows when WireGuard is first enabled. New iOS releases occasionally add alert labels; add them to the list in `vpnHandleSystemAlerts()` to keep the first-run path smooth.
+- **Client-side startup delay.** The client flow polls for the Join card for up to 30 seconds. If the client's VPN comes up faster than the host finishes inviting, uncomment the `sleep(5)` at the top of `clientFlow()` to give the host time to issue the invite before the client starts polling.
+- **Always launching Zoom fresh.** Every iteration calls `app.terminate(); app.launch()` before running the flow. This is a deliberate choice: if iOS backgrounds Zoom, the incoming-call banner is owned by SpringBoard rather than Zoom, and relaunching guarantees that subsequent `XCUIApplication(bundleIdentifier: zoomBundleId)` queries see a consistent UI hierarchy.
+- **Explicit device selection with `xcodebuild`.** For multi-phone campaigns, drive each phone from its own `xcodebuild test -destination id=<UDID>` invocation rather than pressing ⌘U in the Xcode GUI. The bundled `.xctestplan` sets `executeInParallel = false` to make ⌘U deterministic; use Option B in *Running a campaign* for scripted control.
+- **iOS display settings.** Set *Auto-Lock → Never* for the duration of a campaign, and disable StandBy on iOS 17+ (StandBy suppresses taps on the incoming-call card).
+- **Apple Developer enrolment for long campaigns.** Free Apple ID signing caps you at one paired device and expires after 7 days. Enrol in the Apple Developer Program ($99/yr) before a multi-week data-collection run so that the signed build remains installed on both phones.
 
 ---
 
 ## Citing and reusing
 
-If you build on this automation harness, please cite the accompanying paper and the referenced VPN-proxy component in `../vpn-proxy/`. The automation scripts are research artefacts: they are provided as a concrete, reproducible starting point, not as a maintained product. Open an issue before building large campaigns on top of this code so we can flag known drift against the current app versions.
+If you build on this automation harness, please cite the accompanying paper and the VPN-proxy component in `../vpn-proxy/`. Issues and pull requests are welcome — in particular, reports of selector changes in newer app versions help keep the released flows aligned with current iOS app builds.
